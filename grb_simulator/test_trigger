@@ -1,0 +1,128 @@
+'''
+Test Trigger Class
+Cassandra Dove 2024
+This script will run the trigger algorithm on simulated data
+Get the data by converting megalib lightcurves to simulated photon arrival times using simulate_timestamps.py
+'''
+
+import yaml 
+from lifo_queue import FixedLengthLIFOQueue
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+
+class test_trigger() :
+    def __init__(self) -> None:
+        self.running_avg_length = 3                     # running average length
+        self.delay_buffer_bin_size = 0.04               # delay buffer bin size
+        self.significance_constant = 5.5                # number of standard deviations above calculated background rate that will trigger event-by-event
+        self.delay_buffer_length = 5                    # delay buffer length
+        self.background_calc_start = 17                 # duration (s) before current time that will be used to calculate background rate
+
+
+    def __init__(self, config_file) -> None:
+        with open(config_file, 'r') as file :
+            vars = yaml.safe_load(file)
+        self.running_avg_length = vars['running_avg_length']
+        self.significance_constant = vars['significance_constant']
+        self.delay_buffer_bin_size = vars['delay_buffer_bin_size']
+        self.delay_buffer_length = vars['delay_buffer_length']
+        self.background_calc_start = vars['background_calc_start']
+        self.enter_ebe_timestamp = -99
+        self.exit_ebe_timestamp = -99
+
+        # Outputs -- i.e Information sent to ground
+        self.running_avg_timestamps = []
+        self.lightcurve_timestamps = []
+        self.running_avg_counts = []
+        self.lightcurve_counts = []
+
+
+    
+    def algorithm1(self, photon_timestamps_file) :
+
+        # Input  -- Data from simulated photon arrival timestamps file
+        # file = open(photon_timestamps_file, 'r')
+        # data = file.read()
+        # photon_arrival_times = data.split('\n')
+        photon_arrival_times = self.dat_to_list(photon_timestamps_file)
+        burst_name = photon_timestamps_file.split('_')[0]
+
+        # Calculation Data -- Information kept on microcontroller
+        photon_count_queue = FixedLengthLIFOQueue(self.running_avg_length)                                          # Coarse binned deque calculating the most recent running avg
+        background_avgs = FixedLengthLIFOQueue(self.background_calc_start)                                          # This keeps track of the recent running avgs for determining threshold
+        delay_buffer = FixedLengthLIFOQueue(int(self.delay_buffer_length / self.delay_buffer_bin_size))             # Fine binned deque for triggering EBE if it's above threshold
+        delay_buffer_timestamps = FixedLengthLIFOQueue(int(self.delay_buffer_length / self.delay_buffer_bin_size))
+
+        previous_time = 0
+        current_time = 0
+        ra_accumulated_time = 0
+        db_accumulated_time = 0
+
+        photon_count_in_last_second = 0
+        fine_binned_photon_count = 0
+
+        trigger_threshold_met = False
+        already_triggered = False
+        get_end_tail = False
+
+        i = 0
+        while i < len(photon_arrival_times) :
+            previous_time = current_time
+            current_time = float(photon_arrival_times[i])
+            difference = current_time - previous_time
+
+            ra_accumulated_time += difference
+            db_accumulated_time += difference
+
+            photon_count_in_last_second += 1
+            fine_binned_photon_count += 1
+
+            # Filling photon count queue and background averages queue
+            if ra_accumulated_time >= 1 :
+                photon_count_queue.push(photon_count_in_last_second)
+                background_avgs.push(photon_count_queue.get_running_average())
+                self.running_avg_counts.append(photon_count_queue.get_running_average())
+                self.running_avg_timestamps.append(current_time)
+                photon_count_in_last_second = 0
+                ra_accumulated_time = 0
+            
+            if db_accumulated_time >= self.delay_buffer_bin_size :
+                delay_buffer.push(fine_binned_photon_count)
+                delay_buffer_timestamps.push(current_time)
+                fine_binned_photon_count = 0
+                db_accumulated_time = 0
+                
+            i += 1
+        self.display_plots(burst_name)
+
+    def plot_running_avg(self, ax, filename) :
+        ax.plot(self.running_avg_timestamps, self.running_avg_counts, 'o', label='Running Average', color='orange')
+        if (self.enter_ebe_timestamp > 0) :
+            ax.axvline(self.enter_ebe_timestamp, label='EBE Entered', colors='red')
+        if (self.exit_ebe_timestamp > 0) :
+            ax.axvline(self.exit_ebe_timestamp, label='EBE Exited')
+        #ax.annotate(str(round(self.enter_ebe_timestamp,2)) + 's', (self.enter_ebe_timestamp + 0.5, y_max * .8), xycoords='data', xytext=(-0.5,0), textcoords='offset fontsize', ha='right')
+        #ax.annotate(str(round(self.exit_ebe_timestamp,2)) + 's', (self.exit_ebe_timestamp + 0.5, y_max * .8), xycoords='data', xytext=(0.5,0), textcoords='offset fontsize', ha='left')
+        ax.set_xlabel('Time (seconds)')
+        ax.set_ylabel('Running Average')
+        ax.set_title('Running Average of Photon Count (' + str(self.running_avg_length) + ' seconds)\nBurst: ' + filename)
+        ax.legend(loc='upper left')
+    
+    def display_plots(self, filename) :
+        fig = plt.figure()
+        ax = fig.add_subplot()
+        self.plot_running_avg(ax, filename)
+        plt.show()
+    
+    def dat_to_list(self, filename) :
+        lst = []
+        with open(filename, 'r') as f :
+            d = f.readlines()
+            for i in d :
+                k = i.rstrip().split('\n')
+                lst.extend([float(i) for i in k])
+        return lst 
+
+test = test_trigger('grb-simulations/grb_simulator/trigger_algorithm_testing/config.yaml')
+test.algorithm1('/home/cassie/grbsimfrtt/simulated_photon_arrival_times/test/bn200415367_sim_times.dat')
+        

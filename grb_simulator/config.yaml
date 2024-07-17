@@ -1,0 +1,6 @@
+running_avg_length: 3
+ebe_bin_length: 0.04
+significance_constant: 5.5
+delay_buffer_length: 5
+delay_buffer_bin_size: 0.04
+background_calc_start: 17
