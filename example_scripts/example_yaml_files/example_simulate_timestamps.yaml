@@ -1,0 +1,3 @@
+input_path: '/home/cassie/grbsimfrtt/source_inputs/short'                                     # Path to directory housing downloaded lightcurve data
+output_path: '/home/cassie/grbsimfrtt/simulated_photon_arrival_times/test'                    # Path to directory to store simulated photon arrival times
+random_seed: 56                                                                               # Seed for reproducability
